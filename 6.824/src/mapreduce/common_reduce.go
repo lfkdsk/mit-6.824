@@ -75,11 +75,10 @@ func doReduce(
 
 			for err == nil { // read error until nil.
 				// add keys kv.
-				if _, err := kvs[kv.Key]; !err {
-					kvs[kv.Key] = append(kvs[kv.Key], kv.Value)
+				if _, ok := kvs[kv.Key]; !ok {
+					keys = append(keys, kv.Key) // ensure keys is in key list.
 				}
-
-				keys = append(keys, kv.Key)
+				kvs[kv.Key] = append(kvs[kv.Key], kv.Value)
 
 				err = decoder.Decode(&kv)
 			}
@@ -95,7 +94,7 @@ func doReduce(
 	}
 
 	defer func() {
-		_ = output_file.Close()
+		output_file.Close()
 	}()
 
 	output_encoder := json.NewEncoder(output_file)

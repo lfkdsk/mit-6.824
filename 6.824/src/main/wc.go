@@ -4,6 +4,12 @@ import (
 	"fmt"
 	"mapreduce"
 	"os"
+	"sort"
+
+	//"sort"
+	"strconv"
+	"strings"
+	"unicode"
 )
 
 //
@@ -14,7 +20,28 @@ import (
 // of key/value pairs.
 //
 func mapF(filename string, contents string) []mapreduce.KeyValue {
-	// Your code here (Part II).
+	fmt.Printf("%s: map phase\n", filename)
+	words := strings.FieldsFunc(contents, func(r rune) bool {
+		return !unicode.IsLetter(r)
+	})
+	sort.Strings(words)
+
+	kvs := make(map[string]int)
+	var results []mapreduce.KeyValue
+
+	for _, word := range words {
+		kvs[word] = kvs[word] + 1
+	}
+
+	for k, v := range kvs {
+		results = append(results, mapreduce.KeyValue{Key: k, Value: strconv.Itoa(v)})
+	}
+
+	//for _, word := range words {
+	//	results = append(results, mapreduce.KeyValue{Key: word, Value: "1"})
+	//}
+
+	return results
 }
 
 //
@@ -23,7 +50,14 @@ func mapF(filename string, contents string) []mapreduce.KeyValue {
 // any map task.
 //
 func reduceF(key string, values []string) string {
-	// Your code here (Part II).
+	sum := 0
+	for _, value := range values {
+		int_value, _ := strconv.Atoi(value)
+		sum += int_value
+	}
+
+	return strconv.Itoa(sum)
+	//return strconv.Itoa(len(values))
 }
 
 // Can be run in 3 ways:
@@ -41,6 +75,7 @@ func main() {
 			mr = mapreduce.Distributed("wcseq", os.Args[3:], 3, os.Args[2])
 		}
 		mr.Wait()
+		// mr.CleanupFiles()
 	} else {
 		mapreduce.RunWorker(os.Args[2], os.Args[3], mapF, reduceF, 100, nil)
 	}
