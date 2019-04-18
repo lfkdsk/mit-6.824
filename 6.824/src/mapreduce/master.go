@@ -108,7 +108,8 @@ func Distributed(jobName string, files []string, nreduce int, master string) (mr
 	go mr.run(jobName, files, nreduce,
 		func(phase jobPhase) {
 			ch := make(chan string)
-			go mr.forwardRegistrations(ch)
+			// 等待 registrations 把对应的 worker 发送到 channel
+			go mr.forwardRegistrations(ch) 
 			schedule(mr.jobName, mr.files, mr.nReduce, phase, ch)
 		},
 		func() {

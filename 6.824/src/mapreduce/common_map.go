@@ -1,12 +1,16 @@
 package mapreduce
 
 import (
+	"encoding/json"
 	"hash/fnv"
+	"io/ioutil"
+	"log"
+	"os"
 )
 
 func doMap(
 	jobName string, // the name of the MapReduce job
-	mapTask int, // which map task this is
+	mapTask int,    // which map task this is
 	inFile string,
 	nReduce int, // the number of reduce task that will be run ("R" in the paper)
 	mapF func(filename string, contents string) []KeyValue,
@@ -53,6 +57,47 @@ func doMap(
 	//
 	// Your code here (Part I).
 	//
+	data, err := ioutil.ReadFile(inFile)
+	if err != nil {
+		log.Printf("read file error %s", err)
+		return
+	}
+
+	kvs := mapF(inFile, string(data))
+
+	immedicates_files := make([]*os.File, nReduce)
+	immedicates_encoders := make([]*json.Encoder, nReduce)
+
+	defer func() {
+		for i := 0; i < nReduce; i++ {
+			file := immedicates_files[i]
+			if file != nil {
+				_ = file.Close()
+			}
+		}
+	}()
+
+	for i := 0; i < nReduce; i++ {
+		reduce_name := reduceName(jobName, mapTask, i)
+		if file, err := os.Create(reduce_name); err != nil {
+			log.Printf("create file %s error", reduce_name)
+		} else {
+			immedicates_files[i] = file
+			immedicates_encoders[i] = json.NewEncoder(file)
+		}
+	}
+
+	for _, kv := range kvs {
+		reduce_id := ihash(kv.Key) % nReduce
+		encoder := immedicates_encoders[reduce_id]
+		if encoder == nil {
+			continue
+		}
+
+		if err := encoder.Encode(&kv); err != nil {
+			log.Printf("wirte %v to file %s failed", kv, reduceName(jobName, mapTask, reduce_id))
+		}
+	}
 }
 
 func ihash(s string) int {
