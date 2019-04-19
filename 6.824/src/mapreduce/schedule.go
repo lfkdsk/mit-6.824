@@ -79,7 +79,7 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 				registerChan <- worker // re-add
 			} else {
 				log.Printf("Schedule Dotask fail  %v re-run", task_number)
-				taskChan <- task_id
+				taskChan <- args.TaskNumber
 			}
 		}(worker, args)
 	}
