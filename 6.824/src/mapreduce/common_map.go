@@ -65,12 +65,12 @@ func doMap(
 
 	kvs := mapF(inFile, string(data))
 
-	immedicates_files := make([]*os.File, nReduce)
-	immedicates_encoders := make([]*json.Encoder, nReduce)
+	immediateFiles := make([]*os.File, nReduce)
+	immediateEncoders := make([]*json.Encoder, nReduce)
 
 	defer func() {
 		for i := 0; i < nReduce; i++ {
-			file := immedicates_files[i]
+			file := immediateFiles[i]
 			if file != nil {
 				_ = file.Close()
 			}
@@ -78,24 +78,24 @@ func doMap(
 	}()
 
 	for i := 0; i < nReduce; i++ {
-		reduce_name := reduceName(jobName, mapTask, i)
-		if file, err := os.Create(reduce_name); err != nil {
-			log.Printf("create file %s error", reduce_name)
+		reduceName := reduceName(jobName, mapTask, i)
+		if file, err := os.Create(reduceName); err != nil {
+			log.Printf("create file %s error", reduceName)
 		} else {
-			immedicates_files[i] = file
-			immedicates_encoders[i] = json.NewEncoder(file)
+			immediateFiles[i] = file
+			immediateEncoders[i] = json.NewEncoder(file)
 		}
 	}
 
 	for _, kv := range kvs {
-		reduce_id := ihash(kv.Key) % nReduce
-		encoder := immedicates_encoders[reduce_id]
+		reduceId := ihash(kv.Key) % nReduce
+		encoder := immediateEncoders[reduceId]
 		if encoder == nil {
 			continue
 		}
 
 		if err := encoder.Encode(&kv); err != nil {
-			log.Printf("wirte %v to file %s failed", kv, reduceName(jobName, mapTask, reduce_id))
+			log.Printf("wirte %v to file %s failed", kv, reduceName(jobName, mapTask, reduceId))
 		}
 	}
 }

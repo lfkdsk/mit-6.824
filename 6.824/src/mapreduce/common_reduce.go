@@ -55,22 +55,22 @@ func doReduce(
 	var kvs = make(map[string][]string)
 	var keys []string
 
-	im_files := make([]*os.File, nMap)
+	imFiles := make([]*os.File, nMap)
 
 	defer func() {
 		for i := 0; i < nMap; i++ {
-			im_files[i].Close()
+			imFiles[i].Close()
 		}
 	}()
 
 	for i := 0; i < nMap; i++ {
-		reduce_file_name := reduceName(jobName, i, reduceTask)
-		if reduce_file, err := os.Open(reduce_file_name); err != nil {
-			log.Printf("open reduce im name : %s fail", reduce_file_name)
+		reduceFileName := reduceName(jobName, i, reduceTask)
+		if reduceFile, err := os.Open(reduceFileName); err != nil {
+			log.Printf("open reduce im name : %s fail", reduceFileName)
 			continue
 		} else {
 			var kv KeyValue
-			decoder := json.NewDecoder(reduce_file)
+			decoder := json.NewDecoder(reduceFile)
 			err := decoder.Decode(&kv)
 
 			for err == nil { // read error until nil.
@@ -87,19 +87,19 @@ func doReduce(
 
 	// sort string type keys.
 	sort.Strings(keys)
-	output_file, err := os.Create(outFile)
+	outputFile, err := os.Create(outFile)
 	if err != nil {
 		log.Printf("create output file %s failed", outFile)
 		return
 	}
 
 	defer func() {
-		output_file.Close()
+		outputFile.Close()
 	}()
 
-	output_encoder := json.NewEncoder(output_file)
+	outputEncoder := json.NewEncoder(outputFile)
 	for _, key := range keys {
-		if err := output_encoder.Encode(KeyValue{key, reduceF(key, kvs[key])}); err != nil {
+		if err := outputEncoder.Encode(KeyValue{key, reduceF(key, kvs[key])}); err != nil {
 			log.Printf("encode kvs fail key : %s , outFile : %s", key, outFile)
 		}
 	}
