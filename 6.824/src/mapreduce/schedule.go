@@ -21,17 +21,17 @@ type CallReply struct {
 
 func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, registerChan chan string) {
 	var ntasks int
-	var n_other int // number of inputs (for reduce) or outputs (for map)
+	var nOther int // number of inputs (for reduce) or outputs (for map)
 	switch phase {
 	case mapPhase:
 		ntasks = len(mapFiles)
-		n_other = nReduce
+		nOther = nReduce
 	case reducePhase:
 		ntasks = nReduce
-		n_other = len(mapFiles)
+		nOther = len(mapFiles)
 	}
 
-	fmt.Printf("Schedule: %v %v tasks (%d I/Os)\n", ntasks, phase, n_other)
+	fmt.Printf("Schedule: %v %v tasks (%d I/Os)\n", ntasks, phase, nOther)
 
 	// All ntasks tasks have to be scheduled on workers. Once all tasks
 	// have completed successfully, schedule() should return.
@@ -52,22 +52,22 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 		close(taskChan)
 	}()
 
-	for task_id := range taskChan {
+	for taskId := range taskChan {
 		worker, ok := <-registerChan
 		if !ok {
 			continue
 		}
 
-		map_file := mapFiles[task_id]
-		task_number := task_id
+		mapFile := mapFiles[taskId]
+		taskNumber := taskId
 
 		var reply CallReply
 		args := DoTaskArgs{
 			JobName:       jobName,
-			File:          map_file,
+			File:          mapFile,
 			Phase:         phase,
-			TaskNumber:    task_number,
-			NumOtherPhase: n_other,
+			TaskNumber:    taskNumber,
+			NumOtherPhase: nOther,
 		}
 
 		go func(worker string, args DoTaskArgs) {
@@ -75,10 +75,10 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 
 			if result {
 				wg.Done()
-				log.Printf("Schedule Dotask %v", task_number)
-				registerChan <- worker // re-add
+				log.Printf("Schedule Dotask %v", taskNumber)
+				registerChan <- worker // re-add (worker num is less than tasks, so add useless work to pool.)
 			} else {
-				log.Printf("Schedule Dotask fail  %v re-run", task_number)
+				log.Printf("Schedule Dotask fail  %v re-run", taskNumber)
 				taskChan <- args.TaskNumber
 			}
 		}(worker, args)
