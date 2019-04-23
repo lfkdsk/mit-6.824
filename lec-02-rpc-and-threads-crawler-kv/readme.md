@@ -10,7 +10,7 @@ https://golang.org/doc/effective_go.html
 
 很简单基本上是一些 golang 的最佳实践。
 
-## RPC and Threads.
+## Threads.
 
 ```
 Threading challenges:
@@ -56,6 +56,54 @@ Crawler challenges
 3. Unprotected global variable [¶](https://golang.org/doc/articles/race_detector.html#Unprotected_global_variable) 多处 goroutine 竞争同一个全局变量
 4. Primitive unprotected variable [¶](https://golang.org/doc/articles/race_detector.html#Primitive_unprotected_variable) 和 Java 类似提供原子级别的 primitive 类型操作
 
+## RPC
 
+```
+Remote Procedure Call (RPC)
+  a key piece of distributed system machinery; all the labs use RPC
+  goal: easy-to-program client/server communication
 
+RPC message diagram:
+  Client             Server
+    request--->
+       <---response
+```
 
+RPC 对失败的处理方式：
+
+- 尽力而为
+- 最多一次
+
+```
+  idea: server RPC code detects duplicate requests
+    returns previous reply instead of re-running handler
+```
+
+```
+Q : how to ensure XID is unique? 
+```
+
+A：设计全局统一的 key 生成。(这个记得有一致性 hash 方法)。
+
+```
+Q : server must eventually discard info about old RPCs
+    when is discard safe?
+```
+
+A : 带有前一个请求的序号、支持有限次数的尝试 
+
+```
+Q : how to handle dup req while original is still executing?
+```
+
+A : 直接不处理 + pending flag 
+
+```
+What if an at-most-once server crashes and re-starts?
+  if at-most-once duplicate info in memory, server will forget
+    and accept duplicate requests after re-start
+  maybe it should write the duplicate info to disk
+  maybe replica server should also replicate duplicate info
+```
+
+A : 固定的 interval 写入硬盘和数据备份 = = 
