@@ -1,0 +1,49 @@
+# Lec 03 : GFS
+
+## GFS Lecture
+
+### 原则
+
+- 组件失效被认为是常态事件，而不是意外事件。(强调错误处理、降低组件成本)
+- 文件尺寸巨大。
+- 绝大部分文件的修改是采用在文件尾部追加数据，而不是覆盖原有数据的方式。(符合实际的操作预期)。
+- 应用程序和文件系统 API 的协同设计提高了整个系统的灵活性。
+
+### 接口实现
+
+1. 类似传统的文件系统 API
+2. 提供快照和追加记录的功能，每个客户端可以原子性操作(成本很低)，可以实现多路结果合并。
+
+### 实现方式
+
+Master、Chunk、Client 的低耦合的实现方案，跟 MR 本身也有异曲同工之处。Files 会被分割成大小固定的 Chunk 实际存储于 Chunk 的文件系统之中，每个 Chunk 创建的时候就会有一个 Global Unique ID。可以存在多个复制，空实现默认三个。
+
+Master 管理 Chunk 的各种信息，在固定的心跳周期内会对 Chunk Servers 进行轮训。Master 的只包含数据的 meta-data ，client 拿到具体的 meta-data 之后会和 Chunk Servers 进行直接联系。
+
+![gfs](imgs/gfs.png)
+
+**Search Step** : 
+
+1. Chunk Size 固定能够根据文件找到 index 
+2. Client 发送包含文件名和 Chunk Index 的请求到 Master
+3. Master 回复 Chunk Handle 和 Chunk Location (多个副本)   (Client 缓存了返回的 Meta 信息)
+4. Client 直接和最近的 Chunk Server 联系，并且在缓存信息过期前都不会再进行请求了
+
+**选择 64 M 的 Chunk Size 好处都有啥**：
+
+1. 减少 Client 和 Master 的交互，可以多次在一个 Chunk 上面工作。
+
+2. 对同一个块进行多次交互能够保持 TCP 的连接时间，减少网络负载。
+
+3. Master 存储的 MetaData 信息能够更少，减少 Master 的内存压力。
+
+   缺陷：热点过载，批处理程序可能在同时都在请求同一个 Chunk 的文件块，可能的解决方案是增加复制量，或者允许 Client -> Client 的数据流动。
+
+**MetaData** :
+
+1. the file and chunk namespaces,  文件、Chunk 的命名空间
+2. the mapping from files to chunks, 文件、Chunk 的 Mapping 关系
+3. and the locations of each chunk’s replicas.  每个 Chunk 的副本位置
+
+前两者在 Master 的 log 里面也会存一份缓存到 disk 上面，防止 Master 的意外崩溃。Master 只在内存上缓存数据，而是会启动轮询 Chunk Server 去拿相应的信息。
+
