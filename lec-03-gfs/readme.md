@@ -47,3 +47,36 @@ Master 管理 Chunk 的各种信息，在固定的心跳周期内会对 Chunk Se
 
 前两者在 Master 的 log 里面也会存一份缓存到 disk 上面，防止 Master 的意外崩溃。Master 只在内存上缓存数据，而是会启动轮询 Chunk Server 去拿相应的信息。
 
+Master 上的 MetaData 会定期存储到文件系统上，64 bit 就能管理一个 64 M 的 Chunk ，因此 Master 的内存消耗和扩容问题都不大。
+
+Opertation Log —— 操作日志上保存着 GFS 的重要信息在写入 disk 前对 Client 不可见，并且有多个远程备份，在错误回复阶段使用 Log 进行重做，加入 CheckPoint 的设定，能够减少需要恢复的量。压缩 B 树的文件结构能够直接映射到内存。
+
+``` 
+The state of a file region after a data mutation depends on the type of mutation, whether it succeeds or fails, and whether there are concurrent mutations. Table 1 summa- rizes the result.
+```
+
+![regison_success](imgs/region_success.png)
+
+**概念** ：
+
+- **consistent** : 如果所有客户端不论从哪一个备份中读取同一个文件，得到的结果都是相同的，那么我们就说这个文件空间是一致的。
+- **defined：**如果一个文件区域在经过一系列操作之后依旧是一致的，并且客户端完全知晓对它所做的所有操作。
+- 一个操作如果没有被其他并发的写操作影响，那么这个被操作的文件区域是 defined 的。
+- 成功的并发操作也会导致文件区域 undefined，但是一定是一致的（consistent）（客户端有可能只看到了最终一致的结果，但是它并不知道过程）。
+- 失败的并发操作会导致文件区域 undefined，所以一定也是不一致的（inconsistent）。
+- GFS 并不需要是因为什么导致的 undefined（不区分是哪种 undefined），它只需要知道这个区域是 undefined 还是 defined 就可以。
+
+**数据改变**：
+
+- **write** ：往应用程序指定的 offset 进行写入
+- **record append** ：往并发操作进行过的 offset 处进行写入，这个 offset 是由 GFS 决定的（至于如何决定的后面会有介绍），这个 offset 会作为 defined 区域的起始位置发送给 client。
+- **“regular” append** ：对应于 record append 的一个概念，普通的 append 操作通常 offset 指的是文件的末尾，但是在分布式的环境中，offset 就没有这么简单了
+
+**行为确保**：
+
+``` 
+After a sequence of successful mutations, the mutated file region is guaranteed to be defined and contain the data writ- ten by the last mutation.
+```
+
+- （a） 对 Chunk 的所有副本的修改操作顺序一致（3.1章）
+- （b）使用 Chunk 的版本号来检测副本是否因为它所在的 Chunk 服务器宕机（4.5 章）而错过了修改操作而导致其失效。失效的副本不会再进行任何修改操，Master 服务器也不再返回这个 Chunk 副本的位置信息给客户端。它们会被垃圾收集系统尽快回收。
