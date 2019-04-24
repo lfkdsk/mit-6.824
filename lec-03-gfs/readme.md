@@ -80,3 +80,4 @@ After a sequence of successful mutations, the mutated file region is guaranteed 
 
 - （a） 对 Chunk 的所有副本的修改操作顺序一致（3.1章）
 - （b）使用 Chunk 的版本号来检测副本是否因为它所在的 Chunk 服务器宕机（4.5 章）而错过了修改操作而导致其失效。失效的副本不会再进行任何修改操，Master 服务器也不再返回这个 Chunk 副本的位置信息给客户端。它们会被垃圾收集系统尽快回收。
+
