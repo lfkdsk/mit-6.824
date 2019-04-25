@@ -78,6 +78,8 @@ The state of a file region after a data mutation depends on the type of mutation
 After a sequence of successful mutations, the mutated file region is guaranteed to be defined and contain the data writ- ten by the last mutation.
 ```
 
-- （a） 对 Chunk 的所有副本的修改操作顺序一致（3.1章）
-- （b）使用 Chunk 的版本号来检测副本是否因为它所在的 Chunk 服务器宕机（4.5 章）而错过了修改操作而导致其失效。失效的副本不会再进行任何修改操，Master 服务器也不再返回这个 Chunk 副本的位置信息给客户端。它们会被垃圾收集系统尽快回收。
+1. GFS 通过在所有的备份（replicas）上应用顺序相同的操作来保证一个文件区域的 defined（具体细节后面会讨论）
+2. GFS 会使用 chunk version（版本号）来检测 replicas 是否过期，过期的 replicas 既不会被读取也不会被写入
+3. GFS 通过握手（handshakes）来检测已经宕机的 chunkserver
+4. GFS 会通过校验和（checksuming）来检测文件的完整性
 
