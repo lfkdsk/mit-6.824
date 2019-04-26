@@ -22,7 +22,7 @@ Master 管理 Chunk 的各种信息，在固定的心跳周期内会对 Chunk Se
 
 ![gfs](imgs/gfs.png)
 
-**Search Step** : 
+#### **Search Step** : 
 
 1. Chunk Size 固定能够根据文件找到 index 
 2. Client 发送包含文件名和 Chunk Index 的请求到 Master
@@ -39,7 +39,7 @@ Master 管理 Chunk 的各种信息，在固定的心跳周期内会对 Chunk Se
 
    缺陷：热点过载，批处理程序可能在同时都在请求同一个 Chunk 的文件块，可能的解决方案是增加复制量，或者允许 Client -> Client 的数据流动。
 
-**MetaData** :
+#### **MetaData** :
 
 1. the file and chunk namespaces,  文件、Chunk 的命名空间
 2. the mapping from files to chunks, 文件、Chunk 的 Mapping 关系
@@ -57,7 +57,7 @@ The state of a file region after a data mutation depends on the type of mutation
 
 ![regison_success](imgs/region_success.png)
 
-**概念** ：
+##### **概念** ：
 
 - **consistent** : 如果所有客户端不论从哪一个备份中读取同一个文件，得到的结果都是相同的，那么我们就说这个文件空间是一致的。
 - **defined：**如果一个文件区域在经过一系列操作之后依旧是一致的，并且客户端完全知晓对它所做的所有操作。
@@ -66,20 +66,56 @@ The state of a file region after a data mutation depends on the type of mutation
 - 失败的并发操作会导致文件区域 undefined，所以一定也是不一致的（inconsistent）。
 - GFS 并不需要是因为什么导致的 undefined（不区分是哪种 undefined），它只需要知道这个区域是 undefined 还是 defined 就可以。
 
-**数据改变**：
+##### **数据改变**：
 
 - **write** ：往应用程序指定的 offset 进行写入
 - **record append** ：往并发操作进行过的 offset 处进行写入，这个 offset 是由 GFS 决定的（至于如何决定的后面会有介绍），这个 offset 会作为 defined 区域的起始位置发送给 client。
 - **“regular” append** ：对应于 record append 的一个概念，普通的 append 操作通常 offset 指的是文件的末尾，但是在分布式的环境中，offset 就没有这么简单了
 
-**行为确保**：
+##### **行为确保**：
 
 ``` 
 After a sequence of successful mutations, the mutated file region is guaranteed to be defined and contain the data writ- ten by the last mutation.
 ```
 
-1. GFS 通过在所有的备份（replicas）上应用顺序相同的操作来保证一个文件区域的 defined（具体细节后面会讨论）
+1. GFS 通过在所有的备份（replicas）上应用顺序相同的操作来保证一个文件区域的 defined（具体细节后面会讨论）—— 3.1 章
 2. GFS 会使用 chunk version（版本号）来检测 replicas 是否过期，过期的 replicas 既不会被读取也不会被写入
 3. GFS 通过握手（handshakes）来检测已经宕机的 chunkserver
 4. GFS 会通过校验和（checksuming）来检测文件的完整性
+
+#### 系统间交互
+
+- Mutation：mutation 指的是改变了 chunk 的内容或者 metadata，每一次 mutation 都应该作用于所有的备份
+
+- Lease: GFS 使用租约机制（lease）来保障 mutation 的一致性.多个备份中的一个持有 lease，这个备份被称为 primary replica（其余的备份为 secondary replicas），GFS 会把所有的 mutation 都序列化（串行化），让 primary 直行，secondary 也按相同顺序执行，primary 是由 master 选出来的。一个 lease 通常60秒会超时。
+
+![interactives](imgs/active.png)
+
+操作步骤：
+
+1. client 向 master 请求持有 lease 的 chunk（primary replica）位置和其他 replicas 的位置（如果没有 chunk 持有 lease，那么 master 会授予其中一个 replica 一个 lease）
+2. master 返回 primary 的信息和其他 replicas 的位置，然后 client 将这些信息缓存起来（只有当 primary 无法通信或者该 primary replica 没有 lease 了，client 才会向 master 再次请求）
+3. client 会将数据发送到所有的 replicas，每个 chunkserver 会把数据存在 LRU 缓存中。
+4. 在所有的 replicas 都收到了数据之后，client 会向 primary 发送写请求。primary 会给它所收到的所有 mutation 分配序列号（这些 mutation 有可能不是来自于同一个 client），它会在自己的机器上按序列号进行操作。
+5. primary 给 secondaries 发送写请求，secondaries 会按相同的序列执行操作
+6. secondaries 告知 primary 操作执行完毕
+7. primary 向 client 应答，期间的错误也会发送给 client，client 错误处理程序（error handler）会重试失败的 mutation
+
+数据流：
+
+Client 的 control flow 和 data flow 的流程是拆分的，data flow 是有精心选择的管道的，链式发送。每台机器都通过 ip 计算 distance 然后在找同 switch 之下距离最近的一个 replica 副本。通过 TCP 连接将数据传输流水线化（pipelining），pipelining 之所以能够有效果是因为 GFS 的网络是全双工的交换网络
+
+原子记录追加：
+
+GFS 的 record append 操作仅能保证数据在一个原子单位中被写了一次，并不能保证对所有的 replicas 操作的位置都是相同的，比如每次写入的 offset 相同，但是 chunk 有可能不一样。record append 最大不超过 chunk size 的四分之一。
+
+Snapshot 快照：
+
+GFS 通过 snapshot 添加快照，使用了 Copy On Write (写时复制) 与 Linux 进程的范式相同。
+
+当 master 收到 snapshot 操作请求后：
+
+1. 废除所有的 lease，准备 snapshot（相当于暂停了所有写操作，因为这样所有直接到 Chunk 的写操作支持就失效了，就会重新和 Master 进行连接）。
+2. master 记录所有操作，并且将记录写入磁盘。
+3. master 将源文件和目录树的 metadata 进行复制，这样之前的记录就和当前的内存中所保存的状态对应起来了，新建的 snapshot 和源文件指向的会是同一个 chunk
 
