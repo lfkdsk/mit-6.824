@@ -101,15 +101,15 @@ After a sequence of successful mutations, the mutated file region is guaranteed 
 6. secondaries 告知 primary 操作执行完毕
 7. primary 向 client 应答，期间的错误也会发送给 client，client 错误处理程序（error handler）会重试失败的 mutation
 
-数据流：
+##### 数据流：
 
 Client 的 control flow 和 data flow 的流程是拆分的，data flow 是有精心选择的管道的，链式发送。每台机器都通过 ip 计算 distance 然后在找同 switch 之下距离最近的一个 replica 副本。通过 TCP 连接将数据传输流水线化（pipelining），pipelining 之所以能够有效果是因为 GFS 的网络是全双工的交换网络
 
-原子记录追加：
+##### 原子记录追加：
 
 GFS 的 record append 操作仅能保证数据在一个原子单位中被写了一次，并不能保证对所有的 replicas 操作的位置都是相同的，比如每次写入的 offset 相同，但是 chunk 有可能不一样。record append 最大不超过 chunk size 的四分之一。
 
-Snapshot 快照：
+##### Snapshot 快照：
 
 GFS 通过 snapshot 添加快照，使用了 Copy On Write (写时复制) 与 Linux 进程的范式相同。
 
@@ -119,3 +119,132 @@ GFS 通过 snapshot 添加快照，使用了 Copy On Write (写时复制) 与 Li
 2. master 记录所有操作，并且将记录写入磁盘。
 3. master 将源文件和目录树的 metadata 进行复制，这样之前的记录就和当前的内存中所保存的状态对应起来了，新建的 snapshot 和源文件指向的会是同一个 chunk
 
+##### Master 职责
+
+- 执行所有有关于 namespace 的操作
+- 管理整个系统的 chunk replicas：
+  - 做出 chunk replicas 的放置决定
+  - 创建 chunk/replicas
+  - 协调各种操作，保证 chunk 被完全复制
+  - 负载均衡
+  - 回收闲置空间
+
+GFS 的namespace 是一个查找表（lookup table），并且采用了前缀压缩的方式存储在内存中，它是一个树结构，namespace 树中的每一个节点（文件名或者目录名）都有一个读/写锁。
+
+在 Master 对文件或者目录进行操作之前它首先需要获取一个锁，比如要对 /d1/d2/…/dn/leaf 进行操作，需要获得 /d1, /d1/d2, /d1/d2/…/dn的读锁，需要 /d1/d2/…/dn/leaf 的读锁或者写锁（根据不同的操作，锁也不同）
+
+**当/home/user 被快照备份至/save/user 时，如果此时要创建/home/user/foo 会发生什么呢？**
+
+快照操作获得了/home, /save 的读锁和/home/user, /save/user 的写锁。创建/home/user/foo需要/home, /home/user的读锁和/home/user/foo 的写锁。因为两个操作在 /home/user的锁上产生了冲突，所以操作会依次执行，在完成 snapshot 操作之后，释放了/home/user 的写锁， /home/user/foo才会被创建。
+
+##### Chunk 副本创建
+
+Chunk 创建，重新复制和重新负载均衡。
+
+replicas 创建考虑因素：
+
+1. 磁盘使用率
+2. 最近 Chunk Server 最近创建次数
+3. Chunk 分布多机架
+
+Master 创建的原因：副本数量不够、损坏。会根据现有副本数量和复制因数进行排序优先级。
+
+当 master 决定了备份哪个之后，会把当前可用的 chunk 直接克隆到目标位置（遵循replicas 放置规则），新副本考虑因素和 replicas  创建差不多，会限制流量和访问频率。
+
+Master 会周期性质的对 Chunk Server 进行负载均衡的操作，让 Chunk 逐渐填满而非被新 Chunk 一次性填满，通常对磁盘利用率低于平均值的 Chunk 进行移动操作。
+
+##### 辣鸡回收
+
+惰性删除、操作计入 log 、标记隐藏，在可配置的时间内进行清理。
+
+常规扫描还会扫描孤儿 Chunk (不被任何文件包含的 Chunk) 清除其中的 meta-data。
+
+##### 过期失效的副本检测
+
+chunkserver 宕机或者是 mutation 的丢失会导致 replica 的过期，GFS 是如何对 replicas 进行检测，判断它们是否是最新的呢？
+
+GFS 对于每一个 chunk 都会有一个版本号，这个版本号由 master 进行管理，通过版本号可以对过期的 replica 进行甄别。当 master 授予 lease 的时候，会增加版本号并且通知所有未过期的 replicas，master 和 replicas 都会记录下最新的版本号（这些操作需要在客户端进行写入操作之前完成）。如果这时，有一个 replica 不可用了，它的版本号就不会再增加了，在 chunkserver 重启或者重新向 master报告它的版本号时，master 就会知道这个 replica 已经过期了，并且会在垃圾回收时将它进行回收。如果 master 的版本号落后了呢，它会更新自己的版本号。
+
+## Lec QA
+
+**consistency** 一致性， 强一致性、弱一致性
+
+**consistency models** 一致性模型，更多的权衡条件
+
+```
+"Ideal" consistency model
+  Let's go back to the single-machine case
+  Would be nice if a replicated FS behaved like a non-replicated file system
+    [diagram: many clients on the same machine accessing files on single disk]
+  If one application writes, later reads will observe that write
+  What if two application concurrently write to the same file?
+    Q: what happens on a single machine?
+    In file systems often undefined  --- file may have some mixed content
+  What if two application concurrently write to the same directory
+    Q: what happens on a single machine?
+    One goes first, the other goes second (use locking)
+
+Challenges to achieving ideal consistency
+  Concurrency -- as we just saw; plus there are many disks in reality
+  Machine failures -- any operation can fail to complete
+  Network partitions -- may not be able to reach every machine/disk
+  Why are these challenges difficult to overcome?
+    Requires communication between clients and servers
+      May cost performance
+    Protocols can become complex --- see next week
+      Difficult to implement system correctly
+    Many systems in 6.824 don't provide ideal
+      GFS is one example
+```
+
+**GFS goals**
+
+```
+Q: Besides availability of data, what does 3x replication give us?
+   load balancing for reads to hot files affinity
+```
+
+A: 除了读写负载均衡之外也有防止 Chunk 访问出现错误的问题。
+
+```
+    Q: why not just store one copy of each file on a RAID'd disk?
+       RAID isn't commodity
+       Want fault-tolerance for whole machine; not just storage device
+```
+
+A: 这里说的是做整机的容错而不是以文件力度。
+
+```
+Q: why are the chunks so big?
+```
+
+**选择 64 M 的 Chunk Size 好处都有啥**：
+
+1. 减少 Client 和 Master 的交互，可以多次在一个 Chunk 上面工作。
+
+2. 对同一个块进行多次交互能够保持 TCP 的连接时间，减少网络负载。
+
+3. Master 存储的 MetaData 信息能够更少，减少 Master 的内存压力。
+
+   缺陷：热点过载，批处理程序可能在同时都在请求同一个 Chunk 的文件块，可能的解决方案是增加复制量，或者允许 Client -> Client 的数据流动。
+
+```
+  GFS master server knows directory hierarchy
+    for directory, wht files are in it
+    for file, knows chunk servers for each 64 MB
+    master keeps state in memory
+      64 bytes of metadata per each chunk
+    master has private recoverable database for metadata
+      operation log flushed to disk
+      occasional asynchronous compression info checkpoint
+      N.B.: != the application checkpointing in 搂2.7.2
+      master can recovery quickly from power failure
+    shadow masters that lag a little behind master
+      can be promoted to master
+```
+
+```
+References
+  http://queue.acm.org/detail.cfm?id=1594206  (discussion of gfs evolution)
+  http://highscalability.com/blog/2010/9/11/googles-colossus-makes-search-real-time-by-dumping-mapreduce.html
+```
