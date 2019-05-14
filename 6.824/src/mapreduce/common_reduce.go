@@ -58,6 +58,7 @@ func doReduce(
 	imFiles := make([]*os.File, nMap)
 
 	defer func() {
+		// 关闭所有文件
 		for i := 0; i < nMap; i++ {
 			imFiles[i].Close()
 		}
@@ -69,6 +70,7 @@ func doReduce(
 			log.Printf("open reduce im name : %s fail", reduceFileName)
 			continue
 		} else {
+			// 读取生成的 reduce 文件 此处不断地读取 kv 对 直到 err 产生（读取完成）
 			var kv KeyValue
 			decoder := json.NewDecoder(reduceFile)
 			err := decoder.Decode(&kv)
@@ -78,6 +80,7 @@ func doReduce(
 				if _, ok := kvs[kv.Key]; !ok {
 					keys = append(keys, kv.Key) // ensure keys is in key list.
 				}
+				// 合并 reduce 的结果
 				kvs[kv.Key] = append(kvs[kv.Key], kv.Value)
 
 				err = decoder.Decode(&kv)
@@ -97,6 +100,7 @@ func doReduce(
 		outputFile.Close()
 	}()
 
+	// 产生本 reducer 的输出.
 	outputEncoder := json.NewEncoder(outputFile)
 	for _, key := range keys {
 		if err := outputEncoder.Encode(KeyValue{key, reduceF(key, kvs[key])}); err != nil {

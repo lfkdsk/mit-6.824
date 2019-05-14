@@ -94,6 +94,7 @@ func doMap(
 			continue
 		}
 
+		// 生成中间文件
 		if err := encoder.Encode(&kv); err != nil {
 			log.Printf("wirte %v to file %s failed", kv, reduceName(jobName, mapTask, reduceId))
 		}
