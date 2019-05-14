@@ -61,7 +61,8 @@ The state of a file region after a data mutation depends on the type of mutation
 
 - **consistent** : 如果所有客户端不论从哪一个备份中读取同一个文件，得到的结果都是相同的，那么我们就说这个文件空间是一致的。
 - **defined：**如果一个文件区域在经过一系列操作之后依旧是一致的，并且客户端完全知晓对它所做的所有操作。
-- 一个操作如果没有被其他并发的写操作影响，那么这个被操作的文件区域是 defined 的。
+
+  一个操作如果没有被其他并发的写操作影响，那么这个被操作的文件区域是 defined 的。
 - 成功的并发操作也会导致文件区域 undefined，但是一定是一致的（consistent）（客户端有可能只看到了最终一致的结果，但是它并不知道过程）。
 - 失败的并发操作会导致文件区域 undefined，所以一定也是不一致的（inconsistent）。
 - GFS 并不需要是因为什么导致的 undefined（不区分是哪种 undefined），它只需要知道这个区域是 undefined 还是 defined 就可以。
